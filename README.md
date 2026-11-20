@@ -28,6 +28,8 @@ uv add git+https://github.com/mjfrigaard/callgrove
   └─_compile
 ```
 
+A decorated function defined inside another one, such as a Shiny `@reactive.effect` or `@render.text` function inside a server, gets its own node labeled `outer.inner`, so the reactive structure is visible.
+
 Builtins and C functions have no Python source, so they show as leaves. So do calls that can only be known at run time, such as `self.method()`.
 
 By default `call_stack()` follows calls into other packages and the standard library. `package_only=True` keeps those calls as leaves, so the tree stays inside the root function's own package.

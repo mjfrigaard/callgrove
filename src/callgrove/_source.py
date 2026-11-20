@@ -69,16 +69,59 @@ def bound_names(node: FuncNode) -> set[str]:
     return bound - declared_global
 
 
-def called_names(node: FuncNode) -> list[str]:
+def _is_nested_node(n: ast.AST) -> bool:
+    """A decorated def inside a function body; it gets its own tree node."""
+    return isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and bool(
+        n.decorator_list
+    )
+
+
+def nested_defs(node: FuncNode, prefix: str) -> list[tuple[str, FuncNode]]:
+    """Decorated defs inside a function's body, labeled ``prefix.name``.
+
+    These are Shiny's ``@reactive.effect`` and ``@render.*`` functions inside
+    a server, or a ``@functools.wraps`` wrapper inside a decorator. Defs
+    nested inside them are found when they are expanded in turn. A repeated
+    name (Shiny apps often reuse ``_``) gets ``#2``, ``#3``, and so on.
+    """
+    found: list[FuncNode] = []
+
+    def visit(n: ast.AST) -> None:
+        if _is_nested_node(n):
+            found.append(n)  # type: ignore[arg-type]
+            return
+        if isinstance(n, (ast.Lambda, ast.ClassDef)):
+            return
+        for child in ast.iter_child_nodes(n):
+            visit(child)
+
+    for stmt in _body(node):
+        visit(stmt)
+    out: list[tuple[str, FuncNode]] = []
+    counts: dict[str, int] = {}
+    for n in found:
+        name = n.name  # type: ignore[union-attr]
+        counts[name] = counts.get(name, 0) + 1
+        suffix = f"#{counts[name]}" if counts[name] > 1 else ""
+        out.append((f"{prefix}.{name}{suffix}", n))
+    return out
+
+
+def called_names(node: FuncNode, outer: set[str] | None = None) -> list[str]:
     """Dotted names called in a function's body, in source order, unique.
 
     Calls through a locally bound name are skipped, except ``self`` and
-    ``cls``, which are kept so method calls show as leaves.
+    ``cls``, which are kept so method calls show as leaves. ``outer`` holds
+    names bound in enclosing functions, for a nested def. Calls inside a
+    decorated nested def belong to that def (see `nested_defs()`), so they
+    are not counted here.
     """
-    local = bound_names(node) - {"self", "cls"}
+    local = (bound_names(node) | (outer or set())) - {"self", "cls"}
     found: list[str] = []
 
     def visit(n: ast.AST) -> None:
+        if _is_nested_node(n):
+            return
         if isinstance(n, ast.Call):
             name = dotted_name(n.func)
             if name is not None and name.split(".")[0] not in local:
@@ -101,6 +144,8 @@ def referenced_names(node: ast.AST) -> list[str]:
     found: list[str] = []
 
     def visit(n: ast.AST) -> None:
+        if _is_nested_node(n):
+            return
         name = dotted_name(n)
         if name is not None and isinstance(getattr(n, "ctx", None), ast.Load):
             found.append(name)

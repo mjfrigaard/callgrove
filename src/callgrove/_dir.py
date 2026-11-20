@@ -7,7 +7,13 @@ import warnings
 from collections.abc import Iterable
 from pathlib import Path
 
-from ._source import FuncNode, is_module_def, launch_targets, referenced_names
+from ._source import (
+    FuncNode,
+    is_module_def,
+    launch_targets,
+    nested_defs,
+    referenced_names,
+)
 from ._tree import CallTree, build_tree, check_args, prune_children, splice_out
 
 _SKIP_DIRS = {"__pycache__", "site-packages", "node_modules"}
@@ -126,12 +132,23 @@ def call_tree_dir(
             if child is not None and child != name and child not in children:
                 children.append(child)
         graph[name] = children
+        _add_nested(name, node, known, graph)
     tree = build_tree(root, graph, max_depth)
     if modules_only:
         modules = {name for name, node in defs.items() if is_module_def(node)}
         tree.calls = prune_children(tree.calls, modules)
     tree.calls = splice_out(tree.calls, exclude)
     return tree
+
+
+def _add_nested(
+    name: str, node: FuncNode, known: set[str], graph: dict[str, list[str]]
+) -> None:
+    """Give each decorated def nested in ``node`` its own graph entry."""
+    for label, inner in nested_defs(node, name):
+        graph[name].append(label)
+        graph[label] = [r for r in referenced_names(inner) if r in known]
+        _add_nested(label, inner, known, graph)
 
 
 class _Scan:

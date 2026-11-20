@@ -7,7 +7,15 @@ import warnings
 from collections.abc import Iterable
 from typing import Any
 
-from ._source import function_node, is_module_def, lookup, referenced_names, unwrap
+from ._source import (
+    FuncNode,
+    function_node,
+    is_module_def,
+    lookup,
+    nested_defs,
+    referenced_names,
+    unwrap,
+)
 from ._tree import CallTree, build_tree, check_args, prune_children, splice_out
 
 
@@ -97,14 +105,20 @@ def call_tree_app(
 
     graph: dict[str, list[str]] = {app_fun: [name for name, _ in roots]}
     modules: set[str] = set()
-    queue = list(roots)
+    # (name, object, parsed def); a nested def carries its enclosing function
+    # as the object and its own parsed def
+    queue: list[tuple[str, Any, FuncNode | None]] = [(n, o, None) for n, o in roots]
     seen = {name for name, _ in roots}
     while queue:
-        name, obj = queue.pop(0)
-        fun, is_module = unwrap(obj)
-        node = function_node(fun) if isinstance(fun, types.FunctionType) else None
-        if is_module or (node is not None and is_module_def(node)):
-            modules.add(name)
+        name, obj, node = queue.pop(0)
+        if node is None:
+            fun, is_module = unwrap(obj)
+            if isinstance(fun, types.FunctionType):
+                node = function_node(fun)
+            if is_module or (node is not None and is_module_def(node)):
+                modules.add(name)
+        else:
+            fun = obj
         graph[name] = []
         if node is None:
             continue
@@ -116,7 +130,10 @@ def call_tree_app(
             graph[name].append(ref)
             if ref not in seen:
                 seen.add(ref)
-                queue.append((ref, target))
+                queue.append((ref, target, None))
+        for label, inner in nested_defs(node, name):
+            graph[name].append(label)
+            queue.append((label, fun, inner))
 
     tree = build_tree(app_fun, graph, max_depth)
     if modules_only:

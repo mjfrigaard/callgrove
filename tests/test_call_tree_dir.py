@@ -12,7 +12,10 @@ def test_tree_from_files():
         "launch",
         [
             CallTree("app_ui", [CallTree("counter_ui", [CallTree("make_label")])]),
-            CallTree("app_server", [CallTree("counter_server")]),
+            CallTree(
+                "app_server",
+                [CallTree("counter_server", [CallTree("counter_server.count")])],
+            ),
         ],
     )
 

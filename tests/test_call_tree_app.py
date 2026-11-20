@@ -8,7 +8,13 @@ def test_static_ui_without_ui_fun_warns():
     with pytest.warns(UserWarning, match="pass `ui_fun=`"):
         tree = call_tree_app(app, exclude="log_msg")
     assert tree == CallTree(
-        "app", [CallTree("app_server", [CallTree("counter_server")])]
+        "app",
+        [
+            CallTree(
+                "app_server",
+                [CallTree("counter_server", [CallTree("counter_server.count")])],
+            )
+        ],
     )
 
 

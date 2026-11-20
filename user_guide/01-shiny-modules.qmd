@@ -71,6 +71,8 @@ from callgrove import call_tree_dir
 call_tree_dir(app_dir, root="app_server")
 ```
 
+`counter_server.count` is the `@render.text` function defined inside `counter_server`. Each decorated function nested in another one (Shiny's `@reactive.effect`, `@reactive.calc`, and `@render.*` functions, for example) gets its own node, labeled `outer.inner`, with its own calls underneath. A repeated name such as `_` gets `#2`, `#3`, and so on. Undecorated helpers defined inside a function stay folded into it.
+
 `log_msg` shows up under every node. `exclude` drops it and moves its children up:
 
 ```{python}
@@ -91,7 +93,7 @@ When the string names a function instead (an app factory, as in `"counter.app:cr
 
 ## Modules only
 
-`modules_only=True` keeps the root and the functions decorated with `@module.ui` or `@module.server`. Every other function is spliced out and its children move up:
+`modules_only=True` keeps the root and the functions decorated with `@module.ui` or `@module.server`. Every other function, nested reactive functions included, is spliced out and its children move up:
 
 ```{python}
 call_tree_dir(app_dir, root="app_ui", modules_only=True)

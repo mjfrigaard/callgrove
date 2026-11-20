@@ -73,3 +73,15 @@ def test_bad_fn(fn, err):
 def test_missing_dependency_is_named():
     with pytest.raises(ValueError, match="no_such_dependency_xyz"):
         call_stack("broken_dep.f")
+
+
+def test_decorated_nested_defs_are_nodes():
+    tree = call_stack("sample_mod.outer", max_depth=2)
+    assert tree == CallTree(
+        "outer",
+        [
+            CallTree("log", [CallTree("print")]),
+            CallTree("outer._", [CallTree("helper")]),
+            CallTree("outer._#2"),
+        ],
+    )

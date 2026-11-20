@@ -45,3 +45,23 @@ class Thing:
 
     def step(self):
         pass
+
+
+def deco(f):
+    return f
+
+
+def outer(x):
+    @deco
+    def _():
+        helper(x)
+
+    @deco
+    def _():
+        x.method()
+
+    def plain():
+        log("plain")
+
+    plain()
+    return _

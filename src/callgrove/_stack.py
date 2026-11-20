@@ -9,7 +9,15 @@ import types
 from collections.abc import Callable, Iterable
 from typing import Any
 
-from ._source import called_names, function_node, lookup, unwrap
+from ._source import (
+    FuncNode,
+    bound_names,
+    called_names,
+    function_node,
+    lookup,
+    nested_defs,
+    unwrap,
+)
 from ._tree import CallTree, check_args, splice_out
 
 
@@ -146,7 +154,26 @@ def _build_node(
 
     for label, impl in _dispatch_methods(name, obj):
         node.calls.append(_build_node(label, impl, depth + 1, max_depth, visited, pkg))
-    for label in called_names(fn_node):
+    _expand(node, fn_node, fun, set(), depth, max_depth, visited, pkg)
+    return node
+
+
+def _expand(
+    node: CallTree,
+    fn_node: FuncNode,
+    fun: Any,
+    outer: set[str],
+    depth: int,
+    max_depth: int | None,
+    visited: set[int],
+    pkg: str | None,
+) -> None:
+    """Add a def's calls, then its decorated nested defs, as children of ``node``.
+
+    A nested def has no function object of its own here, so its names are
+    looked up through ``fun``, the function it is defined in.
+    """
+    for label in called_names(fn_node, outer):
         child = lookup(label, fun)
         if child is None:
             node.calls.append(CallTree(label))
@@ -154,7 +181,12 @@ def _build_node(
             node.calls.append(
                 _build_node(label, child, depth + 1, max_depth, visited, pkg)
             )
-    return node
+    local = outer | bound_names(fn_node)
+    for label, inner in nested_defs(fn_node, node.name):
+        sub = CallTree(label)
+        if max_depth is None or depth + 1 <= max_depth:
+            _expand(sub, inner, fun, local, depth + 1, max_depth, visited, pkg)
+        node.calls.append(sub)
 
 
 def _dispatch_methods(name: str, obj: Any) -> list[tuple[str, Any]]:
