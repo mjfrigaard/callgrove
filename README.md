@@ -59,3 +59,15 @@ Builtins and C functions have no Python source, so they show as leaves. So do ca
 `call_tree_app(app, app_fun, ui_fun, server_fun, modules_only=False, exclude=None, max_depth=None)` builds the tree of a `shiny.App` from its server function, keeping only functions defined in the app's own package.
 
 All three return a `CallTree`, which prints in the style of R's `lobstr::ast()`. All three take `exclude`, a list of function names to drop (such as a logging helper that appears under every node); each dropped function's children move up into its place.
+
+## Building the documentation
+
+The site is built with [great-docs](https://posit-dev.github.io/great-docs/), which needs Python 3.11 or later and [Quarto](https://quarto.org/). `uv sync` installs the package with the `dev` and `docs` groups:
+
+```bash
+uv sync
+uv run great-docs build    # writes the site to great-docs/_site/
+uv run great-docs preview  # serves it locally
+```
+
+The user guide pages live in `user_guide/` and the theme in `docs-theme.css` and `great-docs.yml`. On every push to `main`, `.github/workflows/docs.yaml` builds the site and publishes it to GitHub Pages.
