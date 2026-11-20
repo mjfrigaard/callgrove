@@ -7,7 +7,7 @@ import warnings
 from collections.abc import Iterable
 from pathlib import Path
 
-from ._source import FuncNode, is_module_def, referenced_names
+from ._source import FuncNode, is_module_def, launch_targets, referenced_names
 from ._tree import CallTree, build_tree, check_args, prune_children, splice_out
 
 _SKIP_DIRS = {"__pycache__", "site-packages", "node_modules"}
@@ -30,6 +30,13 @@ def call_tree_dir(
 
     Because nothing is imported, it works on a package's ``src/`` folder or a
     Shiny for Python app before it is installed.
+
+    A launch function often names the app as a string, as in
+    ``shiny.run_app("myapp.app:app")``. Such a ``"module:attr"`` string is
+    followed when ``module`` is one of the scanned files. When ``attr`` is a
+    module level assignment (``app = create_app()``), the string becomes a
+    node whose children are the functions that assignment calls or names.
+    When ``attr`` is a function (an app factory), it links straight to it.
 
     Parameters
     ----------
@@ -103,17 +110,22 @@ def call_tree_dir(
     if not path.is_dir():
         raise NotADirectoryError(f"`path` is not a folder: {str(path)!r}")
 
-    defs = _parse_dir_functions(path)
+    scan = _parse_dir(path)
+    defs = scan.defs
     if root not in defs:
         raise ValueError(
             f"Could not find a top level function named {root!r} in {str(path)!r}"
         )
 
     known = set(defs)
-    graph = {
-        name: [r for r in referenced_names(node) if r in known and r != name]
-        for name, node in defs.items()
-    }
+    graph: dict[str, list[str]] = {}
+    for name, node in defs.items():
+        children = [r for r in referenced_names(node) if r in known and r != name]
+        for text, module, attr in launch_targets(node):
+            child = _follow_target(scan, text, module, attr, known, graph)
+            if child is not None and child != name and child not in children:
+                children.append(child)
+        graph[name] = children
     tree = build_tree(root, graph, max_depth)
     if modules_only:
         modules = {name for name, node in defs.items() if is_module_def(node)}
@@ -122,12 +134,65 @@ def call_tree_dir(
     return tree
 
 
-def _parse_dir_functions(path: Path) -> dict[str, FuncNode]:
-    """Top level function definitions under ``path``, keyed by name.
+class _Scan:
+    """What one pass over a folder found."""
+
+    def __init__(self) -> None:
+        # top level functions, by name
+        self.defs: dict[str, FuncNode] = {}
+        # dotted module path of the file each function came from
+        self.def_module: dict[str, tuple[str, ...]] = {}
+        # module level `name = value` assignments, per dotted module path
+        self.assigns: dict[tuple[str, ...], dict[str, ast.expr]] = {}
+
+
+def _module_parts(path: Path, rel: tuple[str, ...]) -> tuple[str, ...]:
+    """Dotted module path of a file; a package folder adds its own name first."""
+    parts = [*rel[:-1], rel[-1].removesuffix(".py")]
+    if parts[-1] == "__init__":
+        parts.pop()
+    if (path / "__init__.py").is_file():
+        parts.insert(0, path.resolve().name)
+    return tuple(parts)
+
+
+def _find_module(scan: _Scan, module: str) -> tuple[str, ...] | None:
+    """The scanned module a dotted name points at: exact match, else longest tail."""
+    target = tuple(module.split("."))
+    if target in scan.assigns:
+        return target
+    tails = [m for m in scan.assigns if m and target[-len(m) :] == m]
+    return max(tails, key=len) if tails else None
+
+
+def _follow_target(
+    scan: _Scan,
+    text: str,
+    module: str,
+    attr: str,
+    known: set[str],
+    graph: dict[str, list[str]],
+) -> str | None:
+    """Graph name for a ``"module:attr"`` string, adding a node for it if needed."""
+    mod = _find_module(scan, module)
+    if mod is None:
+        return None
+    value = scan.assigns[mod].get(attr)
+    if value is not None:
+        graph.setdefault(text, [r for r in referenced_names(value) if r in known])
+        return text
+    if attr in known and scan.def_module[attr] == mod:
+        return attr
+    return None
+
+
+def _parse_dir(path: Path) -> _Scan:
+    """Top level functions and assignments under ``path``.
 
     Files that cannot be read or parsed are skipped.
     """
-    defs: dict[str, FuncNode] = {}
+    scan = _Scan()
+    defs = scan.defs
     where: dict[str, Path] = {}
     for file in sorted(path.rglob("*.py")):
         rel = file.relative_to(path).parts
@@ -137,6 +202,8 @@ def _parse_dir_functions(path: Path) -> dict[str, FuncNode]:
             module = ast.parse(file.read_text(encoding="utf-8"), filename=str(file))
         except (SyntaxError, UnicodeDecodeError, OSError):
             continue
+        mod = _module_parts(path, rel)
+        scan.assigns[mod] = _top_level_assigns(module)
         for name, node in _top_level_defs(module):
             if name in defs and where[name] != file:
                 warnings.warn(
@@ -146,7 +213,21 @@ def _parse_dir_functions(path: Path) -> dict[str, FuncNode]:
                 )
             defs[name] = node
             where[name] = file
-    return defs
+            scan.def_module[name] = mod
+    return scan
+
+
+def _top_level_assigns(module: ast.Module) -> dict[str, ast.expr]:
+    out: dict[str, ast.expr] = {}
+    for stmt in module.body:
+        if isinstance(stmt, ast.Assign) and not isinstance(stmt.value, ast.Lambda):
+            for target in stmt.targets:
+                if isinstance(target, ast.Name):
+                    out[target.id] = stmt.value
+        elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+            if isinstance(stmt.target, ast.Name):
+                out[stmt.target.id] = stmt.value
+    return out
 
 
 def _top_level_defs(module: ast.Module) -> list[tuple[str, FuncNode]]:

@@ -50,3 +50,31 @@ def test_errors(tmp_path):
         call_tree_dir(tmp_path, root="f")
     with pytest.raises(TypeError):
         call_tree_dir(tmp_path)
+
+
+def test_launch_string_follows_module_assignment():
+    tree = call_tree_dir(APP, root="run", exclude="log_msg", max_depth=3)
+    assert tree == CallTree(
+        "run",
+        [
+            CallTree(
+                "demo_app.app:app",
+                [
+                    CallTree("app_ui", [CallTree("counter_ui")]),
+                    CallTree("app_server", [CallTree("counter_server")]),
+                ],
+            )
+        ],
+    )
+
+
+def test_launch_string_to_factory_and_unknown_module():
+    assert call_tree_dir(APP, root="run_factory", max_depth=2).calls[0].name == (
+        "launch"
+    )
+    assert call_tree_dir(APP, root="run_elsewhere") == CallTree("run_elsewhere")
+
+
+def test_launch_string_from_parent_folder():
+    tree = call_tree_dir(FIXTURES, root="run", max_depth=1)
+    assert tree == CallTree("run", [CallTree("demo_app.app:app")])

@@ -6,6 +6,7 @@ import ast
 import builtins
 import functools
 import inspect
+import re
 import textwrap
 import types
 from typing import Any, Union
@@ -90,10 +91,12 @@ def called_names(node: FuncNode) -> list[str]:
     return _unique(found)
 
 
-def referenced_names(node: FuncNode) -> list[str]:
+def referenced_names(node: ast.AST) -> list[str]:
     """Every dotted name loaded in a function's body, called or not, in source order.
 
     A bare reference counts, so ``App(app_ui, app_server)`` links to both.
+    ``node`` may also be a plain expression, such as the value of an
+    assignment.
     """
     found: list[str] = []
 
@@ -105,9 +108,31 @@ def referenced_names(node: FuncNode) -> list[str]:
         for child in ast.iter_child_nodes(n):
             visit(child)
 
-    for stmt in _body(node):
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        stmts = _body(node)
+    else:
+        stmts = [node]
+    for stmt in stmts:
         visit(stmt)
     return _unique(found)
+
+
+_TARGET = re.compile(r"^([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*):([A-Za-z_]\w*)$")
+
+
+def launch_targets(node: FuncNode) -> list[tuple[str, str, str]]:
+    """``"pkg.module:attr"`` strings in a function's body, as (text, module, attr).
+
+    This is the form ``shiny.run_app()`` and uvicorn take to name an app.
+    """
+    found: list[tuple[str, str, str]] = []
+    for stmt in _body(node):
+        for n in ast.walk(stmt):
+            if isinstance(n, ast.Constant) and isinstance(n.value, str):
+                m = _TARGET.match(n.value)
+                if m:
+                    found.append((n.value, m.group(1), m.group(2)))
+    return list(dict.fromkeys(found))
 
 
 def is_module_def(node: FuncNode) -> bool:

@@ -50,13 +50,13 @@ By default `call_stack()` follows calls into other packages and the standard lib
 └─counter_server
 ```
 
-`call_tree_dir()` never imports the files it scans. Shiny is not a dependency of `callgrove`; you need it only to build the `App` you pass to `call_tree_app()`.
+`call_tree_dir()` never imports the files it scans. It also follows launch strings: when `run_app()` calls `shiny.run_app("myapp.app:app")`, the tree continues through the `app = ...` assignment in `myapp/app.py`. Shiny is not a dependency of `callgrove`; you need it only to build the `App` you pass to `call_tree_app()`.
 
 ## Functions
 
 `call_stack(fn, max_depth=None, exclude=None, package_only=False)` resolves `fn` and walks its source, following calls and `singledispatch` implementations.
 
-`call_tree_dir(path, root, modules_only=False, exclude=None, max_depth=None)` parses a folder of `.py` files and builds the tree among the top level functions defined there. It warns when two files define the same name.
+`call_tree_dir(path, root, modules_only=False, exclude=None, max_depth=None)` parses a folder of `.py` files and builds the tree among the top level functions defined there. It warns when two files define the same name, and follows `"module:attr"` launch strings into the scanned files.
 
 `call_tree_app(app, app_fun, ui_fun, server_fun, modules_only=False, exclude=None, max_depth=None)` builds the tree of a `shiny.App` from its server function, keeping only functions defined in the app's own package. It warns when the UI was rendered up front and `ui_fun` is not given, since the UI branch is then missing.
 

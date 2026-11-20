@@ -38,6 +38,7 @@ def counter_server(input, output, session):
         return str(input.go())
 ''')
 _ = (app_dir / "app.py").write_text('''
+import shiny
 from shiny import App, ui
 
 from .modules import counter_server, counter_ui, log_msg
@@ -53,6 +54,10 @@ def app_server(input, output, session):
 
 
 app = App(app_ui(), app_server)
+
+
+def run_app():
+    shiny.run_app("counter.app:app")
 ''')
 ```
 
@@ -73,6 +78,16 @@ call_tree_dir(app_dir, root="app_server", exclude="log_msg")
 ```
 
 When two files define a function with the same name, `call_tree_dir()` warns and keeps the one parsed last.
+
+## Launch strings
+
+A launch function usually names the app as a string, which `shiny.run_app()` imports later. `call_tree_dir()` follows a `"module:attr"` string when the module is one of the scanned files. The string becomes a node, and its children are the functions the `app = ...` assignment calls or names:
+
+```{python}
+call_tree_dir(app_dir, root="run_app", exclude="log_msg")
+```
+
+When the string names a function instead (an app factory, as in `"counter.app:create_app"`), the tree links straight to that function. A string that points outside the scanned folder is ignored.
 
 ## Modules only
 
