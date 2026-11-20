@@ -48,3 +48,18 @@ def test_modules_only_unwraps_shiny_decorators():
 def test_rejects_non_app():
     with pytest.raises(TypeError, match="shiny.App"):
         call_tree_app(object())
+
+
+def test_classes_self_and_chained_calls_are_followed():
+    from class_mod import class_app
+
+    with pytest.warns(UserWarning):
+        tree = call_tree_app(class_app)
+    summarize = tree.calls[0].calls[0]
+    assert summarize == CallTree(
+        "summarize",
+        [
+            CallTree("Fitter", [CallTree("validate")]),
+            CallTree("Fitter().fit", [CallTree("self._rows"), CallTree("curve")]),
+        ],
+    )

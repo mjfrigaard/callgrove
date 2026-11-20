@@ -33,6 +33,18 @@ def dotted_name(node: ast.AST) -> str | None:
     return None
 
 
+def chained_name(node: ast.AST) -> str | None:
+    """``a.b().c`` for an attribute on a call to a dotted name, else None.
+
+    One level only: ``a().b().c`` gives None.
+    """
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Call):
+        head = dotted_name(node.value.func)
+        if head is not None:
+            return f"{head}().{node.attr}"
+    return None
+
+
 def _body(node: FuncNode) -> list[ast.AST]:
     return [node.body] if isinstance(node, ast.Lambda) else list(node.body)
 
@@ -111,10 +123,11 @@ def called_names(node: FuncNode, outer: set[str] | None = None) -> list[str]:
     """Dotted names called in a function's body, in source order, unique.
 
     Calls through a locally bound name are skipped, except ``self`` and
-    ``cls``, which are kept so method calls show as leaves. ``outer`` holds
-    names bound in enclosing functions, for a nested def. Calls inside a
-    decorated nested def belong to that def (see `nested_defs()`), so they
-    are not counted here.
+    ``cls``, which are kept so method calls resolve through the class.
+    A method called on a call result is written ``Class().method`` and
+    listed after ``Class``. ``outer`` holds names bound in enclosing
+    functions, for a nested def. Calls inside a decorated nested def belong
+    to that def (see `nested_defs()`), so they are not counted here.
     """
     local = (bound_names(node) | (outer or set())) - {"self", "cls"}
     found: list[str] = []
@@ -124,6 +137,14 @@ def called_names(node: FuncNode, outer: set[str] | None = None) -> list[str]:
             return
         if isinstance(n, ast.Call):
             name = dotted_name(n.func)
+            chain = chained_name(n.func)
+            if chain is not None:
+                visit(n.func)
+                if chain.split(".")[0] not in local:
+                    found.append(chain)
+                for arg in [*n.args, *n.keywords]:
+                    visit(arg)
+                return
             if name is not None and name.split(".")[0] not in local:
                 found.append(name)
         for child in ast.iter_child_nodes(n):
@@ -146,8 +167,14 @@ def referenced_names(node: ast.AST) -> list[str]:
     def visit(n: ast.AST) -> None:
         if _is_nested_node(n):
             return
+        loaded = isinstance(getattr(n, "ctx", None), ast.Load)
+        chain = chained_name(n)
+        if chain is not None and loaded:
+            visit(n.value)  # type: ignore[attr-defined]
+            found.append(chain)
+            return
         name = dotted_name(n)
-        if name is not None and isinstance(getattr(n, "ctx", None), ast.Load):
+        if name is not None and loaded:
             found.append(name)
             return
         for child in ast.iter_child_nodes(n):
@@ -252,9 +279,58 @@ def lookup(name: str, fun: Any) -> Any:
     """Resolve a dotted name the way ``fun`` would see it at call time.
 
     Looks in the closure, then the module globals, then builtins, then follows
-    attributes. Returns None when any step fails.
+    attributes. ``self`` and ``cls`` are the class ``fun`` is defined in,
+    found from its ``__qualname__``. ``Class().method`` is the method on the
+    class. A class resolves to its ``__init__`` when that has Python source
+    (see `init_of()`). Returns None when any step fails.
     """
+    head, sep, tail = name.partition("().")
+    obj = _lookup_dotted(head, fun)
+    if sep:
+        if not inspect.isclass(obj):
+            return None
+        obj = _getattrs(obj, tail.split("."))
+    return init_of(obj)
+
+
+def init_of(obj: Any) -> Any:
+    """A class's ``__init__`` when it is a Python function, else ``obj`` itself.
+
+    Builtin classes and classes that only inherit ``object.__init__`` stay as
+    they are, so they remain leaves.
+    """
+    if inspect.isclass(obj):
+        init = getattr(obj, "__init__", None)
+        if isinstance(init, types.FunctionType):
+            return init
+    return obj
+
+
+def enclosing_class(fun: Any) -> Any:
+    """The class a method is defined in, from its ``__qualname__``, or None."""
+    owner = str(getattr(fun, "__qualname__", "")).split(".")[:-1]
+    if not owner or "<locals>" in owner:
+        return None
+    obj = _getattrs(getattr(fun, "__globals__", {}).get(owner[0]), owner[1:])
+    return obj if inspect.isclass(obj) else None
+
+
+def _getattrs(obj: Any, attrs: list[str]) -> Any:
+    for attr in attrs:
+        if obj is None:
+            return None
+        try:
+            obj = getattr(obj, attr)
+        except Exception:
+            return None
+    return obj
+
+
+def _lookup_dotted(name: str, fun: Any) -> Any:
     base, *rest = name.split(".")
+    if base in ("self", "cls"):
+        # bare `self` is the instance, not something to call
+        return _getattrs(enclosing_class(fun), rest) if rest else None
     missing = object()
     obj = _closure_var(fun, base)
     if obj is None:
@@ -263,9 +339,4 @@ def lookup(name: str, fun: Any) -> Any:
         obj = getattr(builtins, base, missing)
     if obj is missing:
         return None
-    for attr in rest:
-        try:
-            obj = getattr(obj, attr)
-        except Exception:
-            return None
-    return obj
+    return _getattrs(obj, rest)

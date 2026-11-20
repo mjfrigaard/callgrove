@@ -28,7 +28,7 @@ uv add git+https://github.com/mjfrigaard/callgrove
   └─_compile
 ```
 
-Builtins and C functions have no Python source, so they show as leaves. So do calls that can only be known at run time, such as `self.method()`.
+Builtins and C functions have no Python source, so they show as leaves. A class call follows the class's `__init__`, and `self.method()` follows the class the caller is defined in. Calls that can only be known at run time, such as `getattr()`, stay leaves.
 
 By default `call_stack()` follows calls into other packages and the standard library. `package_only=True` keeps those calls as leaves, so the tree stays inside the root function's own package.
 

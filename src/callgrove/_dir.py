@@ -41,10 +41,13 @@ def call_tree_dir(
     ``import pkg.model as mdl``, ``plots.draw()`` after ``from . import
     plots``, and ``g()`` after ``from .m import f as g`` all link to the
     function they name. A module level instance (``model = Model()``) links
-    ``model.fit()`` to ``Model.fit``. Nodes are labeled with the name of the
-    definition, not the alias used at the call site. Folders named
-    ``great-docs`` or ``_freeze`` (docs build output) and hidden folders are
-    skipped.
+    ``model.fit()`` to ``Model.fit``. A class call links to
+    ``Class.__init__`` when the class defines one, ``Class().fit()`` links
+    to ``Class.fit``, and ``self.m()`` or ``cls.m()`` inside a method links
+    to ``m`` on the same class (base classes are not searched). Nodes are
+    labeled with the name of the definition, not the alias used at the call
+    site. Folders named ``great-docs`` or ``_freeze`` (docs build output)
+    and hidden folders are skipped.
 
     Because nothing is imported, it works on a package's ``src/`` folder or a
     Shiny for Python app before it is installed.
@@ -138,13 +141,14 @@ def call_tree_dir(
     graph: dict[str, list[str]] = {}
     for name, node in defs.items():
         mod = scan.def_module[name]
-        children = _resolve_refs(scan, mod, node, exclude_self=name)
+        cls = scan.def_class[name]
+        children = _resolve_refs(scan, mod, node, cls, exclude_self=name)
         for text, module, attr in launch_targets(node):
             child = _follow_target(scan, text, module, attr, graph)
             if child is not None and child != name and child not in children:
                 children.append(child)
         graph[name] = children
-        _add_nested(scan, mod, name, node, graph)
+        _add_nested(scan, mod, cls, name, node, graph)
     tree = build_tree(root, graph, max_depth)
     if modules_only:
         modules = {name for name, node in defs.items() if is_module_def(node)}
@@ -154,25 +158,37 @@ def call_tree_dir(
 
 
 def _resolve_refs(
-    scan: _Scan, mod: Mod, node: ast.AST, exclude_self: str | None = None
+    scan: _Scan,
+    mod: Mod,
+    node: ast.AST,
+    cls: str | None = None,
+    exclude_self: str | None = None,
 ) -> list[str]:
-    """Graph names of the scanned functions a def (or expression) refers to."""
+    """Graph names of the scanned functions a def (or expression) refers to.
+
+    ``cls`` is the class the def is a method of, for ``self`` and ``cls``.
+    """
     out: list[str] = []
     for ref in referenced_names(node):
-        key = _resolve(scan, mod, ref)
+        key = _resolve(scan, mod, ref, cls)
         if key is not None and key != exclude_self and key not in out:
             out.append(key)
     return out
 
 
 def _add_nested(
-    scan: _Scan, mod: Mod, name: str, node: FuncNode, graph: dict[str, list[str]]
+    scan: _Scan,
+    mod: Mod,
+    cls: str | None,
+    name: str,
+    node: FuncNode,
+    graph: dict[str, list[str]],
 ) -> None:
     """Give each decorated def nested in ``node`` its own graph entry."""
     for label, inner in nested_defs(node, name):
         graph[name].append(label)
-        graph[label] = _resolve_refs(scan, mod, inner)
-        _add_nested(scan, mod, label, inner, graph)
+        graph[label] = _resolve_refs(scan, mod, inner, cls)
+        _add_nested(scan, mod, cls, label, inner, graph)
 
 
 Mod = tuple[str, ...]
@@ -187,8 +203,9 @@ class _Scan:
     def __init__(self) -> None:
         # functions by graph name: `f` for top level, `Class.method` for methods
         self.defs: dict[str, FuncNode] = {}
-        # module each graph name was defined in
+        # module each graph name was defined in, and its class for a method
         self.def_module: dict[str, Mod] = {}
+        self.def_class: dict[str, str | None] = {}
         # per module: top level assignments, function names, class names,
         # and imports (bound name -> absolute dotted name, or (module, attr))
         self.assigns: dict[Mod, dict[str, ast.expr]] = {}
@@ -227,25 +244,45 @@ def _find_module(scan: _Scan, module: str) -> Mod | None:
     return min(hits, key=lambda m: abs(len(m) - len(target))) if hits else None
 
 
-def _resolve(scan: _Scan, mod: Mod, dotted: str) -> str | None:
+def _resolve(scan: _Scan, mod: Mod, dotted: str, cls: str | None = None) -> str | None:
     """Graph name a dotted reference in module ``mod`` points at, if it is scanned.
 
     Follows the file's imports (``import a.b as m``, ``from . import m``,
     ``from .m import f as g``), classes, and module level instances
-    (``x = Class()``, then ``x.method``).
+    (``x = Class()``, then ``x.method``). Inside a method of ``cls``,
+    ``self.m`` and ``cls.m`` point at ``cls.m``. ``Class().m`` points at
+    ``Class.m``, and a class itself at ``Class.__init__`` when it defines one.
     """
+    head, sep, tail = dotted.partition("().")
+    target = _target(scan, mod, head, cls)
+    if sep:
+        if target is None or target[0] != "class":
+            return None
+        target = ("instance", target[1])
+        for attr in tail.split("."):
+            target = _attr(scan, target, attr) if target is not None else None
+    if target is None:
+        # a bare name with no binding in this file: fall back to any top level
+        # function of that name, as before imports were read
+        return dotted if "." not in dotted and dotted in scan.defs else None
+    kind, key = target
+    if kind == "class" and "__init__" in scan.methods.get(key, ()):
+        return f"{key}.__init__"
+    return key if kind == "func" else None
+
+
+def _target(scan: _Scan, mod: Mod, dotted: str, cls: str | None) -> Target | None:
+    """What a dotted name (no call in it) points at in module ``mod``."""
     base, *rest = dotted.split(".")
-    target = _lookup(scan, mod, base, set())
+    if base in ("self", "cls"):
+        target: Target | None = ("instance", cls) if cls is not None else None
+    else:
+        target = _lookup(scan, mod, base, set())
     for attr in rest:
         if target is None:
             return None
         target = _attr(scan, target, attr)
-    if target is None:
-        # a bare name with no binding in this file: fall back to any top level
-        # function of that name, as before imports were read
-        return dotted if not rest and dotted in scan.defs else None
-    kind, key = target
-    return key if kind == "func" else None
+    return target
 
 
 def _lookup(
@@ -353,6 +390,7 @@ def _parse_dir(path: Path) -> _Scan:
             scan.defs[name] = node
             where[name] = file
             scan.def_module[name] = mod
+            scan.def_class[name] = cls
         for stmt in module.body:
             if isinstance(stmt, ast.ClassDef):
                 scan.classes[mod].add(stmt.name)

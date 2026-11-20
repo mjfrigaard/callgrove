@@ -120,3 +120,14 @@ def test_skips_docs_build_output(tmp_path):
 def test_imports_resolve_when_scanning_above_src(tmp_path):
     shutil.copytree(FIXTURES / "alias_pkg", tmp_path / "src" / "alias_pkg")
     assert call_tree_dir(tmp_path, root="server") == ALIAS_TREE
+
+
+def test_classes_self_and_chained_calls_resolve(tmp_path):
+    shutil.copy(FIXTURES / "class_mod.py", tmp_path)
+    assert call_tree_dir(tmp_path, root="summarize") == CallTree(
+        "summarize",
+        [
+            CallTree("Fitter.__init__", [CallTree("validate")]),
+            CallTree("Fitter.fit", [CallTree("Fitter._rows"), CallTree("curve")]),
+        ],
+    )

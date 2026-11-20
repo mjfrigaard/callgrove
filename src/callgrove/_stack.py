@@ -14,6 +14,7 @@ from ._source import (
     bound_names,
     called_names,
     function_node,
+    init_of,
     lookup,
     nested_defs,
     unwrap,
@@ -34,9 +35,12 @@ def call_stack(
     ``functools.singledispatch`` functions are followed into every registered
     implementation, which play the part R's ``UseMethod()`` methods do.
 
-    Resolution is static. The function is never called. Calls that can only
-    be known at run time (``self.method()``, ``getattr()``, functions passed
-    in as arguments) show as leaves or are skipped. Builtins and C extension
+    Resolution is static. The function is never called. A class call is
+    followed into the class's ``__init__``, ``self.method()`` and
+    ``cls.method()`` into the class the caller is defined in, and
+    ``Class().method()`` into that method. Calls that can only be known at
+    run time (``getattr()``, functions passed in as arguments, methods on a
+    parameter) show as leaves or are skipped. Builtins and C extension
     functions have no Python source, so they are leaves too.
 
     Parameters
@@ -139,7 +143,7 @@ def _build_node(
     pkg: str | None = None,
 ) -> CallTree:
     node = CallTree(name)
-    fun, _ = unwrap(obj)
+    fun = init_of(unwrap(obj)[0])
     if (
         (max_depth is not None and depth > max_depth)
         or not isinstance(fun, types.FunctionType)

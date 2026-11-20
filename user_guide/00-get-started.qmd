@@ -39,7 +39,7 @@ For each call in the body, `call_stack()` looks the name up the way the function
 2. The globals of the module that defined it.
 3. Python's builtins.
 
-A dotted call such as `re.sub()` resolves `re` that way, then follows the attribute. Names bound inside the function (parameters, local variables, local imports) are skipped. Calls on `self` or `cls` stay in the tree as leaves, because the class that answers them is only known at run time.
+A dotted call such as `re.sub()` resolves `re` that way, then follows the attribute. Names bound inside the function (parameters, local variables, local imports) are skipped. A call on `self` or `cls` is looked up on the class the function is defined in. A class call, such as `Model()`, follows the class's `__init__`, and `Model().fit()` follows `Model.fit`.
 
 A decorated function defined inside the body, such as a `@functools.wraps` wrapper or a Shiny `@reactive.effect`, gets its own node named `outer.inner`. Its calls are listed under it rather than under the function that defines it.
 

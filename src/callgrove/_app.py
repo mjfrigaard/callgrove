@@ -35,7 +35,9 @@ def call_tree_app(
     would see it. When the name is a function defined in the app's own
     package (the top level package of the server's module), it joins the tree
     and its source is read the same way. Functions from other packages, such
-    as ``shiny.ui``, are left out.
+    as ``shiny.ui``, are left out. A class in the app's package counts
+    through its ``__init__``, and ``self.m()`` and ``Class().m()`` are looked
+    up on the class, as in `call_stack()`.
 
     The app is never run, and shiny itself is never imported, so callgrove
     does not depend on it.

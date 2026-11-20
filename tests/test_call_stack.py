@@ -85,3 +85,17 @@ def test_decorated_nested_defs_are_nodes():
             CallTree("outer._#2"),
         ],
     )
+
+
+def test_classes_self_and_chained_calls_are_followed():
+    assert call_stack("class_mod.summarize") == CallTree(
+        "summarize",
+        [
+            CallTree("Plain"),
+            CallTree("Fitter", [CallTree("validate")]),
+            CallTree(
+                "Fitter().fit",
+                [CallTree("self._rows", [CallTree("len")]), CallTree("curve")],
+            ),
+        ],
+    )
