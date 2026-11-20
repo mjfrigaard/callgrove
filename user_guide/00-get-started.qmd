@@ -6,15 +6,20 @@ jupyter: python3
 
 `callgrove` draws the call tree of a Python function without running it. It reads the function's source, finds every function it calls, and follows each of those the same way. It is the Python counterpart to the R package [stackcallr](https://mjfrigaard.github.io/stackcallr/).
 
+On this page I'll draw the tree of a single function with `call_stack()`, then cover the arguments that keep a tree short enough to read.
+
 ## Installation
 
 `callgrove` isn't on PyPI. Add the development version from GitHub to a uv project:
 
-```bash
+```{bash}
+#| eval: false
+#| code-fold: false
+#| echo: true
 uv add git+https://github.com/mjfrigaard/callgrove
 ```
 
-## One function
+## Drawing one function
 
 `call_stack()` takes a dotted name, the same path you would import. `max_depth` stops the tree a few levels down:
 
@@ -26,7 +31,7 @@ call_stack("textwrap.dedent", max_depth=2)
 
 A node with children starts with `█─`. A leaf is plain text. Leaves are builtins (no Python source), functions already drawn higher in the tree, or calls the source alone can't resolve.
 
-## How a call is resolved
+## How is a call resolved?
 
 For each call in the body, `call_stack()` looks the name up the way the function would at call time:
 
@@ -36,7 +41,9 @@ For each call in the body, `call_stack()` looks the name up the way the function
 
 A dotted call such as `re.sub()` resolves `re` that way, then follows the attribute. Names bound inside the function (parameters, local variables, local imports) are skipped. Calls on `self` or `cls` stay in the tree as leaves, because the class that answers them is only known at run time.
 
-## singledispatch
+A decorated function defined inside the body, such as a `@functools.wraps` wrapper or a Shiny `@reactive.effect`, gets its own node named `outer.inner`. Its calls are listed under it rather than under the function that defines it.
+
+## Following singledispatch functions
 
 A `functools.singledispatch` function is Python's closest match to an S3 generic in R. `call_stack()` lists each registered implementation as a child named `function[type]`, then the calls in the default body:
 
@@ -82,7 +89,7 @@ call_stack("textwrap.dedent", max_depth=2, exclude=["enumerate", "zip"])
 
 ## Staying inside one package
 
-A function that calls into a large library can produce a very long tree, because `call_stack()` follows those calls too. `package_only=True` expands only functions from the root's own top level package and leaves everything else as a leaf:
+A function that calls into a large library can produce a very long tree, because `call_stack()` follows those calls too. `package_only=True` expands only the functions from the root's own top level package. Everything else stays a leaf:
 
 ```{python}
 call_stack("callgrove.call_tree_dir", package_only=True, max_depth=2)
@@ -90,4 +97,4 @@ call_stack("callgrove.call_tree_dir", package_only=True, max_depth=2)
 
 ## Recap
 
-`call_stack()` reads source, never runs it, and returns a `CallTree` that prints as an outline. Use `max_depth` or `package_only` to keep it short and `exclude` to hide helpers that appear everywhere. For a Shiny for Python app, see [Shiny module trees](01-shiny-modules.qmd).
+`call_stack()` reads source, never runs it, and returns a `CallTree` that prints as an outline. Use `max_depth` or `package_only` to keep the tree short, and `exclude` to hide helpers that appear everywhere. For a Shiny for Python app, see [Shiny module trees](01-shiny-modules.qmd).

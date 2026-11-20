@@ -1,6 +1,6 @@
 # callgrove
 
-`callgrove` draws the call tree of a Python function without running it. Point it at a function and it reads the source to find every function that function calls, the functions those call, and so on. It also follows `functools.singledispatch` functions into each registered implementation.
+`callgrove` draws the call tree of a Python function without running it. Point it at a function and it reads the source to find every function that function calls, then the functions those call, and so on. It also follows `functools.singledispatch` functions into each registered implementation.
 
 It is the Python counterpart to the R package [stackcallr](https://mjfrigaard.github.io/stackcallr/).
 
@@ -28,8 +28,6 @@ uv add git+https://github.com/mjfrigaard/callgrove
   └─_compile
 ```
 
-A decorated function defined inside another one, such as a Shiny `@reactive.effect` or `@render.text` function inside a server, gets its own node labeled `outer.inner`, so the reactive structure is visible.
-
 Builtins and C functions have no Python source, so they show as leaves. So do calls that can only be known at run time, such as `self.method()`.
 
 By default `call_stack()` follows calls into other packages and the standard library. `package_only=True` keeps those calls as leaves, so the tree stays inside the root function's own package.
@@ -52,17 +50,30 @@ By default `call_stack()` follows calls into other packages and the standard lib
 └─counter_server
 ```
 
-`call_tree_dir()` never imports the files it scans. It reads each file's imports instead, so aliased modules (`import pkg.model as mdl`), relative imports (`from . import plots`), renamed functions, and methods on module level instances all resolve. It also follows launch strings: when `run_app()` calls `shiny.run_app("myapp.app:app")`, the tree continues through the `app = ...` assignment in `myapp/app.py`. Shiny is not a dependency of `callgrove`; you need it only to build the `App` you pass to `call_tree_app()`.
+A decorated function defined inside another one gets its own node, labeled `outer.inner`. That puts each `@reactive.effect` and `@render.text` function under its server, so the reactive structure is visible.
+
+### Imports, aliases, and launch strings
+
+`call_tree_dir()` never imports the files it scans. It reads each file's imports instead, so these calls all resolve:
+
+* Aliased modules: `mdl.fit()` after `import pkg.model as mdl`.
+* Relative imports: `plots.draw()` after `from . import plots`.
+* Renamed functions: `g()` after `from .m import f as g`.
+* Methods on module level instances: `model.fit()` after `model = Model()`.
+
+It also follows launch strings. When `run_app()` calls `shiny.run_app("myapp.app:app")`, the tree continues through the `app = ...` assignment in `myapp/app.py`.
+
+Shiny is not a dependency of `callgrove`. You need it only to build the `App` you pass to `call_tree_app()`.
 
 ## Functions
 
 `call_stack(fn, max_depth=None, exclude=None, package_only=False)` resolves `fn` and walks its source, following calls and `singledispatch` implementations.
 
-`call_tree_dir(path, root, modules_only=False, exclude=None, max_depth=None)` parses a folder of `.py` files and builds the tree among the top level functions defined there. It warns when two files define the same name, and follows `"module:attr"` launch strings into the scanned files.
+`call_tree_dir(path, root, modules_only=False, exclude=None, max_depth=None)` parses a folder of `.py` files and builds the tree among the top level functions and class methods defined there. It warns when two files define the same name, and follows `"module:attr"` launch strings into the scanned files.
 
 `call_tree_app(app, app_fun, ui_fun, server_fun, modules_only=False, exclude=None, max_depth=None)` builds the tree of a `shiny.App` from its server function, keeping only functions defined in the app's own package. It warns when the UI was rendered up front and `ui_fun` is not given, since the UI branch is then missing.
 
-All three return a `CallTree`, which prints in the style of R's `lobstr::ast()`. All three take `exclude`, a list of function names to drop (such as a logging helper that appears under every node); each dropped function's children move up into its place.
+All three return a `CallTree`, which prints in the style of R's `lobstr::ast()`. All three also take `exclude`, a list of function names to drop, such as a logging helper that appears under every node. Each dropped function's children move up into its place.
 
 ## Building the documentation
 
