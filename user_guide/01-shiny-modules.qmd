@@ -79,6 +79,8 @@ call_tree_dir(app_dir, root="app_server")
 call_tree_dir(app_dir, root="app_server", exclude="log_msg")
 ```
 
+Calls are matched through each file's imports. `mdl.fit()` after `import pkg.model as mdl`, `plots.draw()` after `from . import plots`, and `g()` after `from .m import f as g` all link to the function they name. Class methods are collected as `Class.method`, and a module level instance such as `model = Model()` links `model.fit()` to `Model.fit`. Nodes use the definition's name, not the alias.
+
 When two files define a function with the same name, `call_tree_dir()` warns and keeps the one parsed last.
 
 ## Launch strings

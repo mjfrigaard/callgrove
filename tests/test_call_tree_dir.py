@@ -1,3 +1,5 @@
+import shutil
+
 import pytest
 from conftest import FIXTURES
 
@@ -81,3 +83,40 @@ def test_launch_string_to_factory_and_unknown_module():
 def test_launch_string_from_parent_folder():
     tree = call_tree_dir(FIXTURES, root="run", max_depth=1)
     assert tree == CallTree("run", [CallTree("demo_app.app:app")])
+
+
+ALIAS_TREE = CallTree(
+    "server",
+    [
+        CallTree("plot_empty"),
+        CallTree("CareerModel.fit", [CallTree("fit_curve")]),
+        CallTree("plot_trajectory", [CallTree("plot_empty")]),
+        CallTree("is_lower_better"),
+        CallTree("summarize_career", [CallTree("fit_curve")]),
+        CallTree("fit_curve"),
+    ],
+)
+
+
+@pytest.mark.parametrize("where", [FIXTURES / "alias_pkg", FIXTURES])
+def test_imports_aliases_and_instances_resolve(where):
+    assert call_tree_dir(where, root="server") == ALIAS_TREE
+
+
+def test_methods_can_be_roots():
+    assert call_tree_dir(FIXTURES / "alias_pkg", root="CareerModel.fit") == (
+        CallTree("CareerModel.fit", [CallTree("fit_curve")])
+    )
+
+
+def test_skips_docs_build_output(tmp_path):
+    (tmp_path / "a.py").write_text("def f():\n    pass\n")
+    out = tmp_path / "great-docs" / "_extensions"
+    out.mkdir(parents=True)
+    (out / "b.py").write_text("def f():\n    g()\n")
+    assert call_tree_dir(tmp_path, root="f") == CallTree("f")
+
+
+def test_imports_resolve_when_scanning_above_src(tmp_path):
+    shutil.copytree(FIXTURES / "alias_pkg", tmp_path / "src" / "alias_pkg")
+    assert call_tree_dir(tmp_path, root="server") == ALIAS_TREE

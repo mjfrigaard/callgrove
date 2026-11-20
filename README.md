@@ -52,7 +52,7 @@ By default `call_stack()` follows calls into other packages and the standard lib
 └─counter_server
 ```
 
-`call_tree_dir()` never imports the files it scans. It also follows launch strings: when `run_app()` calls `shiny.run_app("myapp.app:app")`, the tree continues through the `app = ...` assignment in `myapp/app.py`. Shiny is not a dependency of `callgrove`; you need it only to build the `App` you pass to `call_tree_app()`.
+`call_tree_dir()` never imports the files it scans. It reads each file's imports instead, so aliased modules (`import pkg.model as mdl`), relative imports (`from . import plots`), renamed functions, and methods on module level instances all resolve. It also follows launch strings: when `run_app()` calls `shiny.run_app("myapp.app:app")`, the tree continues through the `app = ...` assignment in `myapp/app.py`. Shiny is not a dependency of `callgrove`; you need it only to build the `App` you pass to `call_tree_app()`.
 
 ## Functions
 
