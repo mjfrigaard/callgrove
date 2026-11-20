@@ -80,6 +80,14 @@ call_stack("shapes.area")
 call_stack("textwrap.dedent", max_depth=2, exclude=["enumerate", "zip"])
 ```
 
+## Staying inside one package
+
+A function that calls into a large library can produce a very long tree, because `call_stack()` follows those calls too. `package_only=True` expands only functions from the root's own top level package and leaves everything else as a leaf:
+
+```{python}
+call_stack("callgrove.call_tree_dir", package_only=True, max_depth=2)
+```
+
 ## Recap
 
-`call_stack()` reads source, never runs it, and returns a `CallTree` that prints as an outline. Use `max_depth` to keep it short and `exclude` to hide helpers that appear everywhere. For a Shiny for Python app, see [Shiny module trees](01-shiny-modules.qmd).
+`call_stack()` reads source, never runs it, and returns a `CallTree` that prints as an outline. Use `max_depth` or `package_only` to keep it short and `exclude` to hide helpers that appear everywhere. For a Shiny for Python app, see [Shiny module trees](01-shiny-modules.qmd).

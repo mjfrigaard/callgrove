@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import types
+import warnings
 from collections.abc import Iterable
 from typing import Any
 
@@ -43,7 +44,8 @@ def call_tree_app(
         Name of the UI function. ``App`` renders a static UI when it is
         created, so the function behind it is lost. Pass its name here to
         include the UI branch. When the UI was passed as a function
-        (``App(app_ui, server)``), it is found without this.
+        (``App(app_ui, server)``), it is found without this. When neither
+        applies, the tree has no UI branch and a warning says so.
     server_fun
         Label for the server node. Default: the server function's own name.
     modules_only
@@ -57,6 +59,11 @@ def call_tree_app(
     -------
     CallTree
         The root node. Print it to draw the tree.
+
+    Warns
+    -----
+    UserWarning
+        When the UI is static and ``ui_fun`` is not given.
 
     Examples
     --------
@@ -81,6 +88,12 @@ def call_tree_app(
     elif callable(app.ui):
         ui_name = getattr(app.ui, "__name__", "ui")
         roots.insert(0, ("ui" if ui_name == "<lambda>" else ui_name, app.ui))
+    else:
+        warnings.warn(
+            "The app's UI was rendered when App() was created, so its function "
+            "can't be found; pass `ui_fun=` to include the UI branch",
+            stacklevel=2,
+        )
 
     graph: dict[str, list[str]] = {app_fun: [name for name, _ in roots]}
     modules: set[str] = set()

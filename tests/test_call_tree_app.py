@@ -4,8 +4,10 @@ from demo_app.app import app, dynamic_app, one_arg_app
 from callgrove import CallTree, call_tree_app
 
 
-def test_server_branch_only_for_static_ui():
-    assert call_tree_app(app, exclude="log_msg") == CallTree(
+def test_static_ui_without_ui_fun_warns():
+    with pytest.warns(UserWarning, match="pass `ui_fun=`"):
+        tree = call_tree_app(app, exclude="log_msg")
+    assert tree == CallTree(
         "app", [CallTree("app_server", [CallTree("counter_server")])]
     )
 

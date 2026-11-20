@@ -96,7 +96,7 @@ from callgrove import call_tree_app
 call_tree_app(app, exclude="log_msg")
 ```
 
-`App()` renders a static UI when it is created, so the function behind it is gone. Pass its name with `ui_fun` to add the UI branch:
+`App()` renders a static UI when it is created, so the function behind it is gone. The tree above has no UI branch, and `call_tree_app()` warns about it. Pass the function's name with `ui_fun` to add the UI branch:
 
 ```{python}
 call_tree_app(app, ui_fun="app_ui", exclude="log_msg")
