@@ -1,0 +1,109 @@
+---
+title: "Shiny module trees"
+guide-section: "Shiny"
+jupyter: python3
+---
+
+`call_tree_dir()` and `call_tree_app()` draw the call tree of a Shiny for Python app. The first reads `.py` files on disk. The second inspects a `shiny.App` object.
+
+## A small app
+
+```{python}
+import tempfile
+from pathlib import Path
+
+app_dir = Path(tempfile.mkdtemp()) / "counter"
+app_dir.mkdir()
+(app_dir / "__init__.py").write_text("")
+(app_dir / "modules.py").write_text('''
+from shiny import module, render, ui
+
+
+def log_msg(msg):
+    return msg
+
+
+@module.ui
+def counter_ui(label="Count"):
+    log_msg("counter_ui")
+    return ui.input_action_button("go", label)
+
+
+@module.server
+def counter_server(input, output, session):
+    log_msg("counter_server")
+
+    @render.text
+    def count():
+        return str(input.go())
+''')
+_ = (app_dir / "app.py").write_text('''
+from shiny import App, ui
+
+from .modules import counter_server, counter_ui, log_msg
+
+
+def app_ui():
+    return ui.page_fluid(counter_ui("a"))
+
+
+def app_server(input, output, session):
+    log_msg("server")
+    counter_server("a")
+
+
+app = App(app_ui(), app_server)
+''')
+```
+
+## From files
+
+`call_tree_dir()` parses every `.py` file under `path` without importing it. It links each top level function to the other top level functions its body calls or names:
+
+```{python}
+from callgrove import call_tree_dir
+
+call_tree_dir(app_dir, root="app_server")
+```
+
+`log_msg` shows up under every node. `exclude` drops it and moves its children up:
+
+```{python}
+call_tree_dir(app_dir, root="app_server", exclude="log_msg")
+```
+
+When two files define a function with the same name, `call_tree_dir()` warns and keeps the one parsed last.
+
+## Modules only
+
+`modules_only=True` keeps the root and the functions decorated with `@module.ui` or `@module.server`. Every other function is spliced out and its children move up:
+
+```{python}
+call_tree_dir(app_dir, root="app_ui", modules_only=True)
+```
+
+## From an App object
+
+`call_tree_app()` takes the server out of a `shiny.App` and follows the names it references. Only functions defined in the app's own package join the tree, so `shiny.ui` calls are left out. The app is never run:
+
+```{python}
+import sys
+
+sys.path.insert(0, str(app_dir.parent))
+from counter.app import app
+from callgrove import call_tree_app
+
+call_tree_app(app, exclude="log_msg")
+```
+
+`App()` renders a static UI when it is created, so the function behind it is gone. Pass its name with `ui_fun` to add the UI branch:
+
+```{python}
+call_tree_app(app, ui_fun="app_ui", exclude="log_msg")
+```
+
+Module functions are found even though Shiny wraps them, because `call_tree_app()` peels the decorator off before reading the source.
+
+## Recap
+
+`call_tree_dir()` works on source you haven't installed. `call_tree_app()` works on an app you can import. Both return a `CallTree` and take `modules_only`, `exclude`, and `max_depth`.

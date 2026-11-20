@@ -1,0 +1,46 @@
+# Great Docs Configuration
+# See https://posit-dev.github.io/great-docs/user-guide/configuration.html
+
+parser: numpy
+dynamic: true
+
+display_name: callgrove
+repo: https://github.com/mjfrigaard/callgrove
+site_url: https://mjfrigaard.github.io/callgrove/
+pypi: false
+
+authors:
+  - name: Martin Frigaard
+    role: Author
+    email: mjfrigaard@pm.me
+
+skill:
+  enabled: false
+
+changelog:
+  enabled: false
+
+reference:
+  - title: Call trees
+    desc: Build the call tree of a function, a folder of source files, or a Shiny app.
+    contents:
+      - call_stack
+      - call_tree_dir
+      - call_tree_app
+  - title: Tree object
+    desc: The node every builder returns, and how it prints.
+    contents:
+      - CallTree
+
+# Docs Theme
+# ----------
+# 70s palette from stackcallr's pkgdown theme; fonts and the rest are in
+# docs-theme.css
+accent_color:
+  light: "#2A6F77"
+  dark: "#E8A33D"
+navbar_color:
+  light: "#F9F3E1"
+  dark: "#3E2A1E"
+site:
+  css: docs-theme.css

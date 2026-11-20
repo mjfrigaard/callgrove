@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "callgrove"
+version = "0.1.0"
+description = "Statically inspect and draw the call tree of a Python function"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Martin Frigaard", email = "mjfrigaard@pm.me" }]
+requires-python = ">=3.10"
+dependencies = []
+
+[project.urls]
+Homepage = "https://mjfrigaard.github.io/callgrove/"
+Repository = "https://github.com/mjfrigaard/callgrove"
+
+[dependency-groups]
+dev = ["pytest", "pytest-cov", "ruff", "mypy", "shiny>=1.0"]
+docs = ["great-docs; python_version >= '3.11'", "jupyter", "shiny>=1.0"]
+
+[tool.uv]
+default-groups = ["dev", "docs"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/callgrove"]
+
+[tool.ruff]
+src = ["src"]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "src"]
+addopts = "--doctest-modules --ignore=tests/fixtures --cov=callgrove --cov-report=term-missing"
+doctest_optionflags = ["NORMALIZE_WHITESPACE", "ELLIPSIS"]

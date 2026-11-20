@@ -1,0 +1,52 @@
+import pytest
+from conftest import FIXTURES
+
+from callgrove import CallTree, call_tree_dir
+
+APP = FIXTURES / "demo_app"
+
+
+def test_tree_from_files():
+    tree = call_tree_dir(APP, root="launch", exclude="log_msg")
+    assert tree == CallTree(
+        "launch",
+        [
+            CallTree("app_ui", [CallTree("counter_ui", [CallTree("make_label")])]),
+            CallTree("app_server", [CallTree("counter_server")]),
+        ],
+    )
+
+
+def test_modules_only_and_max_depth():
+    assert call_tree_dir(APP, root="launch", modules_only=True) == CallTree(
+        "launch", [CallTree("counter_ui"), CallTree("counter_server")]
+    )
+    assert call_tree_dir(APP, root="launch", max_depth=1) == CallTree(
+        "launch", [CallTree("app_ui"), CallTree("app_server")]
+    )
+
+
+def test_lambda_and_bad_files(tmp_path):
+    (tmp_path / "a.py").write_text("f = lambda: g()\ndef g():\n    pass\n")
+    (tmp_path / "broken.py").write_text("def (:\n")
+    hidden = tmp_path / ".venv"
+    hidden.mkdir()
+    (hidden / "h.py").write_text("def f():\n    pass\n")
+    assert call_tree_dir(tmp_path, root="f") == CallTree("f", [CallTree("g")])
+
+
+def test_duplicate_definitions_warn(tmp_path):
+    (tmp_path / "a.py").write_text("def f():\n    pass\n")
+    (tmp_path / "b.py").write_text("def f():\n    g()\ndef g():\n    pass\n")
+    with pytest.warns(UserWarning, match="'f' is defined in both"):
+        tree = call_tree_dir(tmp_path, root="f")
+    assert tree == CallTree("f", [CallTree("g")])
+
+
+def test_errors(tmp_path):
+    with pytest.raises(NotADirectoryError):
+        call_tree_dir(tmp_path / "nope", root="f")
+    with pytest.raises(ValueError, match="Could not find"):
+        call_tree_dir(tmp_path, root="f")
+    with pytest.raises(TypeError):
+        call_tree_dir(tmp_path)
