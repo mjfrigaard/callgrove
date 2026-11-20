@@ -34,6 +34,10 @@ def test_singledispatch_methods_are_children():
 def test_locals_skipped_self_kept():
     assert names(call_stack("sample_mod.uses_locals")) == ["len"]
     assert names(call_stack("sample_mod.Thing.go", max_depth=1)) == [
+        "Thing.step",
+        "helper",
+    ]
+    assert names(call_stack("sample_mod.Thing.go", max_depth=1, labels="call")) == [
         "self.step",
         "helper",
     ]
@@ -75,20 +79,49 @@ def test_missing_dependency_is_named():
         call_stack("broken_dep.f")
 
 
-def test_decorated_nested_defs_are_nodes():
+def test_nested_defs_are_nodes():
     tree = call_stack("sample_mod.outer", max_depth=2)
     assert tree == CallTree(
         "outer",
         [
-            CallTree("log", [CallTree("print")]),
+            CallTree("outer.plain", [CallTree("log")]),
             CallTree("outer._", [CallTree("helper")]),
             CallTree("outer._#2"),
         ],
     )
 
 
+def test_helpers_seen_from_reactives_passed_and_recursive():
+    tree = call_stack("sample_mod.server_like", max_depth=3)
+    assert tree == CallTree(
+        "server_like",
+        [
+            CallTree("outer_helper_user"),
+            CallTree("server_like.passed"),
+            CallTree(
+                "server_like.effect",
+                [
+                    CallTree("server_like.weight", [CallTree("log")]),
+                    CallTree("server_like.again", [CallTree("server_like.again")]),
+                ],
+            ),
+        ],
+    )
+
+
 def test_classes_self_and_chained_calls_are_followed():
     assert call_stack("class_mod.summarize") == CallTree(
+        "summarize",
+        [
+            CallTree("Plain"),
+            CallTree("Fitter.__init__", [CallTree("validate")]),
+            CallTree(
+                "Fitter.fit",
+                [CallTree("Fitter._rows", [CallTree("len")]), CallTree("curve")],
+            ),
+        ],
+    )
+    assert call_stack("class_mod.summarize", labels="call") == CallTree(
         "summarize",
         [
             CallTree("Plain"),
@@ -99,3 +132,13 @@ def test_classes_self_and_chained_calls_are_followed():
             ),
         ],
     )
+
+
+def test_one_function_under_two_names_is_one_node():
+    assert names(call_stack("sample_mod.twice")) == ["log"]
+    assert names(call_stack("sample_mod.twice", labels="call")) == ["log"]
+
+
+def test_bad_labels():
+    with pytest.raises(ValueError, match="labels"):
+        call_stack("len", labels="both")

@@ -7,19 +7,23 @@ import importlib
 import sys
 import types
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Any
 
 from ._source import (
     FuncNode,
     bound_names,
     called_names,
+    def_label,
     function_node,
     init_of,
     lookup,
     nested_defs,
+    nested_helpers,
+    referenced_names,
     unwrap,
 )
-from ._tree import CallTree, check_args, splice_out
+from ._tree import CallTree, check_args, check_labels, splice_out
 
 
 def call_stack(
@@ -27,6 +31,7 @@ def call_stack(
     max_depth: int | None = None,
     exclude: str | Iterable[str] | None = None,
     package_only: bool = False,
+    labels: str = "def",
 ) -> CallTree:
     """Build the call tree of a function from its source, without running it.
 
@@ -59,6 +64,12 @@ def call_stack(
         When True, only functions from the root's own top level package are
         expanded. Calls into other packages and the standard library stay in
         the tree as leaves. Default False, which follows every call.
+    labels
+        ``"def"`` (the default) labels a function from the root's own package
+        by its definition name (``Model.fit``), and everything else by the
+        text at the call site (``re.sub``). ``"call"`` uses the call site
+        text everywhere (``model.fit``). Nested functions are always labeled
+        ``outer.inner``.
 
     Returns
     -------
@@ -68,7 +79,7 @@ def call_stack(
     Examples
     --------
     >>> call_stack("callgrove.CallTree.__str__")
-    █─__str__
+    █─CallTree.__str__
     ├─_label
     └─█─_draw
       ├─enumerate
@@ -80,11 +91,27 @@ def call_stack(
     ...
     """
     exclude = check_args(exclude, max_depth)
+    labels = check_labels(labels)
     name, fun = _resolve_fn(fn)
-    pkg = _top_package(unwrap(fun)[0]) if package_only else None
-    tree = _build_node(name, fun, 1, max_depth, set(), pkg)
+    home = _top_package(init_of(unwrap(fun)[0]))
+    ctx = _Ctx(max_depth, set(), home if package_only else None, home, labels)
+    tree = _build_node(name, fun, 1, ctx)
     tree.calls = splice_out(tree.calls, exclude)
     return tree
+
+
+@dataclass
+class _Ctx:
+    """Settings and state shared by one call_stack() walk."""
+
+    max_depth: int | None
+    visited: set[int]
+    pkg: str | None  # package_only boundary
+    home: str  # the root's top level package, for definition labels
+    labels: str
+
+    def within(self, depth: int) -> bool:
+        return self.max_depth is None or depth <= self.max_depth
 
 
 def _resolve_fn(fn: str | Callable[..., Any]) -> tuple[str, Any]:
@@ -135,30 +162,30 @@ def _top_package(fun: Any) -> str:
 
 
 def _build_node(
-    name: str,
-    obj: Any,
-    depth: int,
-    max_depth: int | None,
-    visited: set[int],
-    pkg: str | None = None,
+    text: str, obj: Any, depth: int, ctx: _Ctx, fixed: bool = False
 ) -> CallTree:
-    node = CallTree(name)
+    """A node for ``obj`` reached as ``text``; ``fixed`` keeps ``text`` as its label."""
     fun = init_of(unwrap(obj)[0])
+    is_func = isinstance(fun, types.FunctionType)
+    name = text
+    if ctx.labels == "def" and not fixed and is_func and _top_package(fun) == ctx.home:
+        name = def_label(fun)
+    node = CallTree(name, key=def_label(fun) if is_func else None)
     if (
-        (max_depth is not None and depth > max_depth)
-        or not isinstance(fun, types.FunctionType)
-        or id(fun) in visited
-        or (pkg is not None and _top_package(fun) != pkg)
+        not ctx.within(depth)
+        or not is_func
+        or id(fun) in ctx.visited
+        or (ctx.pkg is not None and _top_package(fun) != ctx.pkg)
     ):
         return node
-    visited.add(id(fun))
+    ctx.visited.add(id(fun))
     fn_node = function_node(fun)
     if fn_node is None:
         return node
 
     for label, impl in _dispatch_methods(name, obj):
-        node.calls.append(_build_node(label, impl, depth + 1, max_depth, visited, pkg))
-    _expand(node, fn_node, fun, set(), depth, max_depth, visited, pkg)
+        node.calls.append(_build_node(label, impl, depth + 1, ctx, fixed=True))
+    _expand(node, fn_node, fun, set(), {}, frozenset(), depth, ctx)
     return node
 
 
@@ -167,30 +194,53 @@ def _expand(
     fn_node: FuncNode,
     fun: Any,
     outer: set[str],
+    helpers: dict[str, tuple[str, FuncNode]],
+    on_path: frozenset[str],
     depth: int,
-    max_depth: int | None,
-    visited: set[int],
-    pkg: str | None,
+    ctx: _Ctx,
 ) -> None:
     """Add a def's calls, then its decorated nested defs, as children of ``node``.
 
     A nested def has no function object of its own here, so its names are
-    looked up through ``fun``, the function it is defined in.
+    looked up through ``fun``, the function it is defined in. ``helpers``
+    are the undecorated defs visible from enclosing functions; a helper
+    becomes a node where it is called or passed by name. ``on_path`` holds
+    the helpers being expanded above this one, so recursion stops.
     """
-    for label in called_names(fn_node, outer):
-        child = lookup(label, fun)
-        if child is None:
-            node.calls.append(CallTree(label))
-        else:
-            node.calls.append(
-                _build_node(label, child, depth + 1, max_depth, visited, pkg)
-            )
+    prefix = node.key or node.name
+    scope = {**helpers, **nested_helpers(fn_node, prefix)}
     local = outer | bound_names(fn_node)
-    for label, inner in nested_defs(fn_node, node.name):
-        sub = CallTree(label)
-        if max_depth is None or depth + 1 <= max_depth:
-            _expand(sub, inner, fun, local, depth + 1, max_depth, visited, pkg)
-        node.calls.append(sub)
+    called = called_names(fn_node, outer, keep=set(scope))
+    passed = [r for r in referenced_names(fn_node) if r in scope and r not in called]
+    for text in [*called, *passed]:
+        if text in scope:
+            label, inner = scope[text]
+            child = CallTree(label, key=label)
+            if label not in on_path and ctx.within(depth + 1):
+                _expand(
+                    child, inner, fun, local, scope, on_path | {label}, depth + 1, ctx
+                )
+        else:
+            obj = lookup(text, fun)
+            child = (
+                CallTree(text)
+                if obj is None
+                else _build_node(text, obj, depth + 1, ctx)
+            )
+        _add(node, child)
+    for label, inner in nested_defs(fn_node, prefix):
+        sub = CallTree(label, key=label)
+        if ctx.within(depth + 1):
+            _expand(sub, inner, fun, local, scope, on_path, depth + 1, ctx)
+        _add(node, sub)
+
+
+def _add(node: CallTree, child: CallTree) -> None:
+    """Append ``child`` unless a sibling has its label or stands for the same def."""
+    for c in node.calls:
+        if c.name == child.name or (child.key is not None and c.key == child.key):
+            return
+    node.calls.append(child)
 
 
 def _dispatch_methods(name: str, obj: Any) -> list[tuple[str, Any]]:

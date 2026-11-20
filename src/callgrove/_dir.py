@@ -13,9 +13,17 @@ from ._source import (
     is_module_def,
     launch_targets,
     nested_defs,
+    nested_helpers,
     referenced_names,
 )
-from ._tree import CallTree, build_tree, check_args, prune_children, splice_out
+from ._tree import (
+    CallTree,
+    build_tree,
+    check_args,
+    check_labels,
+    prune_children,
+    splice_out,
+)
 
 # generated or vendored folders; great-docs and _freeze are docs build output
 _SKIP_DIRS = {"__pycache__", "site-packages", "node_modules", "great-docs", "_freeze"}
@@ -27,6 +35,7 @@ def call_tree_dir(
     modules_only: bool = False,
     exclude: str | Iterable[str] | None = None,
     max_depth: int | None = None,
+    labels: str = "def",
 ) -> CallTree:
     """Build the call tree of the functions defined in a folder of ``.py`` files.
 
@@ -76,6 +85,11 @@ def call_tree_dir(
         their place. The root is never dropped.
     max_depth
         How many levels to expand. ``None`` (the default) expands everything.
+    labels
+        ``"def"`` (the default) labels each node by its definition name
+        (``Model.fit``). ``"call"`` uses the text at the call site
+        (``model.fit``) for the edge into each node. Nested functions are
+        always labeled ``outer.inner``.
 
     Returns
     -------
@@ -138,18 +152,17 @@ def call_tree_dir(
             f"Could not find a top level function named {root!r} in {str(path)!r}"
         )
 
+    labels = check_labels(labels)
     graph: dict[str, list[str]] = {}
+    texts: dict[tuple[str, str], str] = {}
     for name, node in defs.items():
         mod = scan.def_module[name]
-        cls = scan.def_class[name]
-        children = _resolve_refs(scan, mod, node, cls, exclude_self=name)
+        _add_def(scan, mod, scan.def_class[name], name, node, {}, graph, texts)
         for text, module, attr in launch_targets(node):
             child = _follow_target(scan, text, module, attr, graph)
-            if child is not None and child != name and child not in children:
-                children.append(child)
-        graph[name] = children
-        _add_nested(scan, mod, cls, name, node, graph)
-    tree = build_tree(root, graph, max_depth)
+            if child is not None and child != name and child not in graph[name]:
+                graph[name].append(child)
+    tree = build_tree(root, graph, max_depth, texts if labels == "call" else None)
     if modules_only:
         modules = {name for name, node in defs.items() if is_module_def(node)}
         tree.calls = prune_children(tree.calls, modules)
@@ -157,38 +170,53 @@ def call_tree_dir(
     return tree
 
 
-def _resolve_refs(
-    scan: _Scan,
-    mod: Mod,
-    node: ast.AST,
-    cls: str | None = None,
-    exclude_self: str | None = None,
-) -> list[str]:
-    """Graph names of the scanned functions a def (or expression) refers to.
-
-    ``cls`` is the class the def is a method of, for ``self`` and ``cls``.
-    """
+def _resolve_refs(scan: _Scan, mod: Mod, node: ast.AST) -> list[str]:
+    """Graph names of the scanned functions an expression refers to."""
     out: list[str] = []
     for ref in referenced_names(node):
-        key = _resolve(scan, mod, ref, cls)
-        if key is not None and key != exclude_self and key not in out:
+        key = _resolve(scan, mod, ref)
+        if key is not None and key not in out:
             out.append(key)
     return out
 
 
-def _add_nested(
+def _add_def(
     scan: _Scan,
     mod: Mod,
     cls: str | None,
-    name: str,
+    key: str,
     node: FuncNode,
+    inherited: dict[str, tuple[str, FuncNode]],
     graph: dict[str, list[str]],
+    texts: dict[tuple[str, str], str],
 ) -> None:
-    """Give each decorated def nested in ``node`` its own graph entry."""
-    for label, inner in nested_defs(node, name):
-        graph[name].append(label)
-        graph[label] = _resolve_refs(scan, mod, inner, cls)
-        _add_nested(scan, mod, cls, label, inner, graph)
+    """Add a def, and the defs nested in it, to ``graph``.
+
+    ``cls`` is the class the def is a method of, for ``self`` and ``cls``.
+    ``inherited`` holds the undecorated helpers of enclosing functions; a
+    helper is linked where it is called or named. ``texts`` collects the
+    call site text of each edge, for ``labels="call"``.
+    """
+    own = nested_helpers(node, key)
+    scope = {**inherited, **own}
+    children: list[str] = []
+    for ref in referenced_names(node):
+        if ref in scope:
+            child: str | None = scope[ref][0]
+            text = scope[ref][0]
+        else:
+            child = _resolve(scan, mod, ref, cls)
+            text = ref
+        if child is None or child == key or child in children:
+            continue
+        children.append(child)
+        texts.setdefault((key, child), text)
+    graph[key] = children
+    for label, inner in own.values():
+        _add_def(scan, mod, cls, label, inner, scope, graph, texts)
+    for label, inner in nested_defs(node, key):
+        graph[key].append(label)
+        _add_def(scan, mod, cls, label, inner, scope, graph, texts)
 
 
 Mod = tuple[str, ...]

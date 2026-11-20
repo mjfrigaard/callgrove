@@ -22,7 +22,7 @@ def test_ui_fun_adds_ui_branch():
     tree = call_tree_app(app, ui_fun="app_ui", exclude="log_msg")
     ui = tree.calls[0]
     assert ui.name == "app_ui"
-    assert [c.name for c in ui.calls] == ["counter_ui", "modules.counter_ui"]
+    assert [c.name for c in ui.calls] == ["counter_ui"]
 
 
 def test_dynamic_ui_found_without_ui_fun():
@@ -38,11 +38,7 @@ def test_dynamic_ui_found_without_ui_fun():
 
 def test_modules_only_unwraps_shiny_decorators():
     tree = call_tree_app(one_arg_app, ui_fun="app_ui", modules_only=True)
-    assert [c.name for c in tree.calls] == [
-        "counter_ui",
-        "modules.counter_ui",
-        "counter_server",
-    ]
+    assert [c.name for c in tree.calls] == ["counter_ui", "counter_server"]
 
 
 def test_rejects_non_app():
@@ -59,7 +55,41 @@ def test_classes_self_and_chained_calls_are_followed():
     assert summarize == CallTree(
         "summarize",
         [
+            CallTree("Fitter.__init__", [CallTree("validate")]),
+            CallTree("Fitter.fit", [CallTree("Fitter._rows"), CallTree("curve")]),
+        ],
+    )
+    with pytest.warns(UserWarning):
+        tree = call_tree_app(class_app, labels="call")
+    assert tree.calls[0].calls[0] == CallTree(
+        "summarize",
+        [
             CallTree("Fitter", [CallTree("validate")]),
             CallTree("Fitter().fit", [CallTree("self._rows"), CallTree("curve")]),
+        ],
+    )
+
+
+def test_server_helpers_are_nodes_and_server_fun_relabels():
+    from helper_app import helper_app
+
+    with pytest.warns(UserWarning):
+        tree = call_tree_app(helper_app, server_fun="srv")
+    assert tree == CallTree(
+        "app",
+        [
+            CallTree(
+                "srv",
+                [
+                    CallTree(
+                        "helper_server.plot",
+                        [CallTree("helper_server._weight", [CallTree("weight_of")])],
+                    ),
+                    CallTree(
+                        "helper_server.table",
+                        [CallTree("helper_server._weight", [CallTree("weight_of")])],
+                    ),
+                ],
+            )
         ],
     )

@@ -50,7 +50,7 @@ By default `call_stack()` follows calls into other packages and the standard lib
 └─counter_server
 ```
 
-A decorated function defined inside another one gets its own node, labeled `outer.inner`. That puts each `@reactive.effect` and `@render.text` function under its server, so the reactive structure is visible.
+A decorated function defined inside another one gets its own node, labeled `outer.inner`. That puts each `@reactive.effect` and `@render.text` function under its server, so the reactive structure is visible. An undecorated helper inside the server appears wherever it is called.
 
 ### Imports, aliases, and launch strings
 
@@ -67,13 +67,13 @@ Shiny is not a dependency of `callgrove`. You need it only to build the `App` yo
 
 ## Functions
 
-`call_stack(fn, max_depth=None, exclude=None, package_only=False)` resolves `fn` and walks its source, following calls and `singledispatch` implementations.
+`call_stack(fn, max_depth=None, exclude=None, package_only=False, labels="def")` resolves `fn` and walks its source, following calls and `singledispatch` implementations.
 
-`call_tree_dir(path, root, modules_only=False, exclude=None, max_depth=None)` parses a folder of `.py` files and builds the tree among the top level functions and class methods defined there. It warns when two files define the same name, and follows `"module:attr"` launch strings into the scanned files.
+`call_tree_dir(path, root, modules_only=False, exclude=None, max_depth=None, labels="def")` parses a folder of `.py` files and builds the tree among the top level functions and class methods defined there. It warns when two files define the same name, and follows `"module:attr"` launch strings into the scanned files.
 
-`call_tree_app(app, app_fun, ui_fun, server_fun, modules_only=False, exclude=None, max_depth=None)` builds the tree of a `shiny.App` from its server function, keeping only functions defined in the app's own package. It warns when the UI was rendered up front and `ui_fun` is not given, since the UI branch is then missing.
+`call_tree_app(app, app_fun, ui_fun, server_fun, modules_only=False, exclude=None, max_depth=None, labels="def")` builds the tree of a `shiny.App` from its server function, keeping only functions defined in the app's own package. It warns when the UI was rendered up front and `ui_fun` is not given, since the UI branch is then missing.
 
-All three return a `CallTree`, which prints in the style of R's `lobstr::ast()`. All three also take `exclude`, a list of function names to drop, such as a logging helper that appears under every node. Each dropped function's children move up into its place.
+All three return a `CallTree`, which prints in the style of R's `lobstr::ast()`. Nodes for your own code use definition names (`Model.fit`); `labels="call"` shows the text at each call site instead (`model.fit`). All three also take `exclude`, a list of function names to drop, such as a logging helper that appears under every node. Each dropped function's children move up into its place.
 
 ## Building the documentation
 

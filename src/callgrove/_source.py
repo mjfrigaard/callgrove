@@ -88,6 +88,36 @@ def _is_nested_node(n: ast.AST) -> bool:
     )
 
 
+def _is_def(n: ast.AST) -> bool:
+    return isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+
+
+def nested_helpers(node: FuncNode, prefix: str) -> dict[str, tuple[str, FuncNode]]:
+    """Undecorated defs inside a function's body, by name, labeled ``prefix.name``.
+
+    A helper becomes a node only where it is called or passed by name (see
+    `called_names()` and `referenced_names()`), so an unused helper stays
+    out of the tree. A later def with the same name replaces an earlier one,
+    as it would when the code runs.
+    """
+    found: dict[str, tuple[str, FuncNode]] = {}
+
+    def visit(n: ast.AST) -> None:
+        if _is_def(n):
+            if not _is_nested_node(n):
+                name = n.name  # type: ignore[attr-defined]
+                found[name] = (f"{prefix}.{name}", n)  # type: ignore[assignment]
+            return
+        if isinstance(n, (ast.Lambda, ast.ClassDef)):
+            return
+        for child in ast.iter_child_nodes(n):
+            visit(child)
+
+    for stmt in _body(node):
+        visit(stmt)
+    return found
+
+
 def nested_defs(node: FuncNode, prefix: str) -> list[tuple[str, FuncNode]]:
     """Decorated defs inside a function's body, labeled ``prefix.name``.
 
@@ -119,21 +149,25 @@ def nested_defs(node: FuncNode, prefix: str) -> list[tuple[str, FuncNode]]:
     return out
 
 
-def called_names(node: FuncNode, outer: set[str] | None = None) -> list[str]:
+def called_names(
+    node: FuncNode, outer: set[str] | None = None, keep: set[str] | None = None
+) -> list[str]:
     """Dotted names called in a function's body, in source order, unique.
 
     Calls through a locally bound name are skipped, except ``self`` and
     ``cls``, which are kept so method calls resolve through the class.
     A method called on a call result is written ``Class().method`` and
     listed after ``Class``. ``outer`` holds names bound in enclosing
-    functions, for a nested def. Calls inside a decorated nested def belong
-    to that def (see `nested_defs()`), so they are not counted here.
+    functions, for a nested def. ``keep`` holds nested helper names, which
+    are listed even though they are bound locally. Calls inside a nested def
+    belong to that def (see `nested_defs()` and `nested_helpers()`), so they
+    are not counted here.
     """
-    local = (bound_names(node) | (outer or set())) - {"self", "cls"}
+    local = (bound_names(node) | (outer or set())) - {"self", "cls"} - (keep or set())
     found: list[str] = []
 
     def visit(n: ast.AST) -> None:
-        if _is_nested_node(n):
+        if _is_def(n):
             return
         if isinstance(n, ast.Call):
             name = dotted_name(n.func)
@@ -165,7 +199,7 @@ def referenced_names(node: ast.AST) -> list[str]:
     found: list[str] = []
 
     def visit(n: ast.AST) -> None:
-        if _is_nested_node(n):
+        if _is_def(n):
             return
         loaded = isinstance(getattr(n, "ctx", None), ast.Load)
         chain = chained_name(n)
@@ -291,6 +325,12 @@ def lookup(name: str, fun: Any) -> Any:
             return None
         obj = _getattrs(obj, tail.split("."))
     return init_of(obj)
+
+
+def def_label(fun: Any) -> str:
+    """A function's definition name: ``f``, ``Class.method``, or ``outer.inner``."""
+    name = str(getattr(fun, "__qualname__", None) or getattr(fun, "__name__", "?"))
+    return name.replace(".<locals>", "")
 
 
 def init_of(obj: Any) -> Any:

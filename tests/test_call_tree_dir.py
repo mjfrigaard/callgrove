@@ -131,3 +131,35 @@ def test_classes_self_and_chained_calls_resolve(tmp_path):
             CallTree("Fitter.fit", [CallTree("Fitter._rows"), CallTree("curve")]),
         ],
     )
+
+
+def test_server_helpers_are_nodes(tmp_path):
+    shutil.copy(FIXTURES / "helper_app.py", tmp_path / "helper_app.py")
+    weight = CallTree("helper_server._weight", [CallTree("weight_of")])
+    assert call_tree_dir(tmp_path, root="helper_server") == CallTree(
+        "helper_server",
+        [
+            CallTree("helper_server.plot", [weight]),
+            CallTree("helper_server.table", [weight]),
+        ],
+    )
+
+
+def test_call_labels_show_call_site_text():
+    tree = call_tree_dir(FIXTURES / "alias_pkg", root="server", labels="call")
+    assert [c.name for c in tree.calls] == [
+        "plots.plot_empty",
+        "_model.fit",
+        "plots.plot_trajectory",
+        "mdl.is_lower_better",
+        "summarize",
+        "alias_pkg.model.fit_curve",
+    ]
+    # exclude and modules_only still match definition names
+    tree = call_tree_dir(
+        FIXTURES / "alias_pkg", root="server", labels="call", exclude="CareerModel.fit"
+    )
+    assert "_model.fit" not in [c.name for c in tree.calls]
+    assert call_tree_dir(
+        APP, root="launch", modules_only=True, labels="call"
+    ) == CallTree("launch", [CallTree("counter_ui"), CallTree("counter_server")])

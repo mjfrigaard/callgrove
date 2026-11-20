@@ -34,6 +34,9 @@ class CallTree:
 
     name: str
     calls: list[CallTree] = field(default_factory=list)
+    # the definition this node stands for, when `name` is call site text;
+    # used by `exclude` and `modules_only`, never drawn or compared
+    key: str | None = field(default=None, compare=False)
 
     def __str__(self) -> str:
         lines = [_label(self)]
@@ -59,47 +62,65 @@ def build_tree(
     node: str,
     graph: Mapping[str, list[str]],
     max_depth: int | None = None,
+    labels: Mapping[tuple[str, str], str] | None = None,
     visited: tuple[str, ...] = (),
     depth: int = 1,
+    label: str | None = None,
 ) -> CallTree:
-    """Depth first build of a CallTree from a ``{name: [callee, ...]}`` graph.
+    """Depth first build of a CallTree from a ``{key: [callee key, ...]}`` graph.
 
-    A name already on the path from the root is skipped, which breaks cycles.
+    ``labels`` maps a ``(caller, callee)`` edge to the text drawn for the
+    callee; without an entry the key itself is drawn. A key already on the
+    path from the root is skipped, which breaks cycles.
     """
+    out = CallTree(label or node, key=node)
     if max_depth is not None and depth > max_depth:
-        return CallTree(node)
+        return out
     path = (*visited, node)
-    children = [c for c in graph.get(node, []) if c not in path]
-    return CallTree(
-        node, [build_tree(c, graph, max_depth, path, depth + 1) for c in children]
-    )
+    for c in graph.get(node, []):
+        if c not in path:
+            text = (labels or {}).get((node, c))
+            out.calls.append(
+                build_tree(c, graph, max_depth, labels, path, depth + 1, text)
+            )
+    return out
+
+
+def _ids(node: CallTree) -> set[str]:
+    return {node.name} if node.key is None else {node.name, node.key}
 
 
 def prune_children(calls: list[CallTree], keep: set[str]) -> list[CallTree]:
-    """Keep only nodes named in ``keep``; a dropped node's children move up."""
+    """Keep nodes named (or keyed) in ``keep``; a dropped node's children move up."""
     out: list[CallTree] = []
     for child in calls:
         grandchildren = prune_children(child.calls, keep)
-        if child.name in keep:
-            out.append(CallTree(child.name, grandchildren))
+        if _ids(child) & keep:
+            out.append(CallTree(child.name, grandchildren, child.key))
         else:
             out.extend(grandchildren)
     return out
 
 
 def splice_out(calls: list[CallTree], exclude: Iterable[str] | None) -> list[CallTree]:
-    """Drop nodes named in ``exclude``; a dropped node's children move up."""
+    """Drop nodes named (or keyed) in ``exclude``; their children move up."""
     if not exclude:
         return calls
     exclude = set(exclude)
     out: list[CallTree] = []
     for child in calls:
         grandchildren = splice_out(child.calls, exclude)
-        if child.name in exclude:
+        if _ids(child) & exclude:
             out.extend(grandchildren)
         else:
-            out.append(CallTree(child.name, grandchildren))
+            out.append(CallTree(child.name, grandchildren, child.key))
     return out
+
+
+def check_labels(labels: object) -> str:
+    if labels not in ("def", "call"):
+        raise ValueError('`labels` must be "def" or "call"')
+    return str(labels)
 
 
 def check_args(exclude: object, max_depth: object) -> list[str]:

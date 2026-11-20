@@ -48,9 +48,12 @@ def counter_ui(label="Count"):
 def counter_server(input, output, session):
     log_msg("counter_server")
 
+    def _clicks(n):
+        return f"{n} clicks"
+
     @render.text
     def count():
-        return str(input.go())
+        return _clicks(input.go())
 ''')
 _ = (app_dir / "app.py").write_text('''
 import shiny
@@ -86,7 +89,9 @@ from callgrove import call_tree_dir
 call_tree_dir(app_dir, root="app_server")
 ```
 
-`counter_server.count` is the `@render.text` function defined inside `counter_server`. Every decorated function nested in another one gets its own node, labeled `outer.inner`. That covers Shiny's `@reactive.effect`, `@reactive.calc`, and `@render.*` functions. A repeated name such as `_` gets `#2`, `#3`, and so on. Undecorated helpers defined inside a function stay folded into it.
+`counter_server.count` is the `@render.text` function defined inside `counter_server`. Every decorated function nested in another one gets its own node, labeled `outer.inner`. That covers Shiny's `@reactive.effect`, `@reactive.calc`, and `@render.*` functions. A repeated name such as `_` gets `#2`, `#3`, and so on.
+
+Undecorated helpers work differently. `counter_server._clicks` sits under `count`, because that's where it is called, not where it is defined. A helper also shows up where it is passed by name, such as a callback. A helper that nothing calls is left out.
 
 `log_msg` shows up under every node. `exclude` drops it and moves its children up:
 
@@ -125,7 +130,7 @@ flowchart TD
     style node fill:#E8A33D,color:#1B2A41
 ```
 
-The tree below shows the result. Nodes use the name of the definition (`Labeler.label`), not the alias at the call site:
+The tree below shows the result. Nodes use the name of the definition (`Labeler.label`), not the text at the call site:
 
 ```{python}
 call_tree_dir(app_dir, root="counter_ui")
@@ -138,6 +143,16 @@ The same lookup handles the other common forms:
 * Renamed function: `g()` after `from .m import f as g`.
 
 Class methods can also be roots. `call_tree_dir(app_dir, root="Labeler.label")` starts the tree at that method.
+
+## Choosing labels
+
+By default every builder labels a node with its definition name, so one function reached under two names is drawn once. `labels="call"` shows the text written at each call site instead:
+
+```{python}
+call_tree_dir(app_dir, root="counter_ui", labels="call")
+```
+
+`exclude` and `modules_only` match definition names in both modes, so `exclude="Labeler.label"` works either way. Nested functions keep their `outer.inner` labels in both modes.
 
 ## Launch strings
 
@@ -177,8 +192,8 @@ call_tree_app(app, exclude="log_msg")
 call_tree_app(app, ui_fun="app_ui", exclude="log_msg")
 ```
 
-Module functions are found even though Shiny wraps them, because `call_tree_app()` peels the decorator off before reading the source. Here the nodes keep the name written at the call site (`_labeler.label`), because `call_tree_app()` looks each name up in the running module.
+Module functions are found even though Shiny wraps them, because `call_tree_app()` peels the decorator off before reading the source. The UI branch matches what `call_tree_dir()` drew from the files: the same definition names, `Labeler.label` included.
 
 ## Recap
 
-`call_tree_dir()` works on source you haven't installed, and it resolves imports, aliases, and methods without running anything. `call_tree_app()` works on an app you can import. Both return a `CallTree` and take `modules_only`, `exclude`, and `max_depth`.
+`call_tree_dir()` works on source you haven't installed, and it resolves imports, aliases, and methods without running anything. `call_tree_app()` works on an app you can import. Both return a `CallTree` labeled by definition names, and both take `modules_only`, `exclude`, `max_depth`, and `labels`.

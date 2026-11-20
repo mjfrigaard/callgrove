@@ -1,6 +1,8 @@
 import functools
 import json
 
+import sample_mod as sm
+
 
 def log(msg):
     print(msg)
@@ -65,3 +67,34 @@ def outer(x):
 
     plain()
     return _
+
+
+def server_like(input):
+    def weight():
+        log("w")
+        return input
+
+    def again(n):
+        return again(n - 1) if n else 0
+
+    def passed():
+        return 1
+
+    def unused():
+        print("never shown")
+
+    outer_helper_user(passed)
+
+    @deco
+    def effect():
+        weight()
+        again(3)
+
+
+def outer_helper_user(f):
+    return f()
+
+
+def twice():
+    log("a")
+    sm.log("b")
